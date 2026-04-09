@@ -13,7 +13,7 @@ sha256sums=('SKIP')
 build() {
   cd "$pkgname-$pkgver"
   export CARGO_HOME="$srcdir/cargo"
-  cargo build --release --locked
+  cargo build --release
 }
 
 package() {
