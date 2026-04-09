@@ -507,7 +507,7 @@ impl eframe::App for HwMonitorApp {
         // Sticky footer na dole - zawsze widoczny
         egui::TopBottomPanel::bottom("footer_panel").show(ctx, |ui| {
             ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("1.0").color(egui::Color32::DARK_GRAY));
+                ui.label(egui::RichText::new("0.1.1").color(egui::Color32::DARK_GRAY));
                 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     // Czas odświeżenia (po prawej)

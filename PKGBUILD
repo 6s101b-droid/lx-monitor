@@ -1,5 +1,5 @@
 pkgname=lx-monitor
-pkgver=0.1.0
+pkgver=0.1.1
 pkgrel=1
 pkgdesc="Linux Monitor - Monitor CPU, GPU temperatures and system resources"
 arch=('x86_64')
@@ -7,7 +7,7 @@ url="https://github.com/yourusername/hwmonitor"
 license=('MIT')
 depends=('glibc' 'gcc-libs' 'libgl' 'libx11' 'libxi' 'libxcursor' 'libxrandr' 'libxinerama' 'libxkbcommon' 'pciutils' 'vulkan-icd-loader')
 makedepends=('cargo')
-source=("Cargo.toml" "Cargo.lock" "lx-monitor.desktop" "lx-monitor.png" "src")
+source=("Cargo.toml" "Cargo.lock" "lx-monitor.desktop" "lx-monitor.svg" "src")
 sha256sums=('SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP')
 
 build() {
@@ -23,5 +23,5 @@ package() {
   install -Dm644 "lx-monitor.desktop" "$pkgdir/usr/share/applications/lx-monitor.desktop"
   
   # Install icon
-  install -Dm644 "lx-monitor.png" "$pkgdir/usr/share/icons/hicolor/256x256/apps/lx-monitor.png"
+  install -Dm644 "lx-monitor.svg" "$pkgdir/usr/share/icons/hicolor/256x256/apps/lx-monitor.svg"
 }
