@@ -42,6 +42,8 @@ struct Translations {
     last_update_prefix: &'static str,
     last_update_suffix: &'static str,
     unknown: &'static str,
+    gpu_clock: &'static str,
+    vram_used: &'static str,
 }
 
 fn get_translations() -> &'static Translations {
@@ -82,6 +84,8 @@ fn get_translations() -> &'static Translations {
         last_update_prefix: "Last update: ",
         last_update_suffix: "s ago",
         unknown: "Unknown",
+        gpu_clock: "GPU Clock",
+        vram_used: "VRAM Usage",
     };
 
     static POLISH: Translations = Translations {
@@ -121,6 +125,8 @@ fn get_translations() -> &'static Translations {
         last_update_prefix: "Ostatnia aktualizacja: ",
         last_update_suffix: "s temu",
         unknown: "Nieznany",
+        gpu_clock: "Taktowanie GPU",
+        vram_used: "Zużycie VRAM",
     };
 
     // Wykryj jzyk systemowy
@@ -201,9 +207,9 @@ fn get_private_memory_mb(pid: u32) -> Option<f64> {
     None
 }
 
-fn draw_gauge(ui: &mut egui::Ui, percent: f32, color: egui::Color32, label: &str) {
-    let (rect, _response) = ui.allocate_exact_size(egui::vec2(150.0, 100.0), egui::Sense::hover());
-    let center = rect.center() + egui::vec2(0.0, 20.0);
+fn draw_gauge(ui: &mut egui::Ui, percent: f32, color: egui::Color32, label: &str, extra_info: Option<&str>) {
+    let (rect, _response) = ui.allocate_exact_size(egui::vec2(150.0, 120.0), egui::Sense::hover());
+    let center = rect.center() + egui::vec2(0.0, 25.0);
     let radius = 60.0;
     let stroke_width = 12.0;
 
@@ -230,8 +236,9 @@ fn draw_gauge(ui: &mut egui::Ui, percent: f32, color: egui::Color32, label: &str
         egui::Stroke::new(stroke_width, color),
     )));
 
+    let mut y_offset = -20.0;
     ui.put(
-        egui::Rect::from_center_size(center + egui::vec2(0.0, -15.0), egui::vec2(rect.width(), 20.0)),
+        egui::Rect::from_center_size(center + egui::vec2(0.0, y_offset), egui::vec2(rect.width(), 20.0)),
         egui::Label::new(
             egui::RichText::new(format!("{:.1}%", percent))
                 .strong()
@@ -239,8 +246,19 @@ fn draw_gauge(ui: &mut egui::Ui, percent: f32, color: egui::Color32, label: &str
                 .color(color)
         ),
     );
+    y_offset += 18.0;
+    if let Some(info) = extra_info {
+        for line in info.lines() {
+            y_offset += 14.0;
+            ui.put(
+                egui::Rect::from_center_size(center + egui::vec2(0.0, y_offset), egui::vec2(rect.width(), 20.0)),
+                egui::Label::new(egui::RichText::new(line).size(11.0).color(egui::Color32::from_gray(200))),
+            );
+        }
+    }
+    y_offset += 20.0;
     ui.put(
-        egui::Rect::from_center_size(center + egui::vec2(0.0, 10.0), egui::vec2(rect.width(), 20.0)),
+        egui::Rect::from_center_size(center + egui::vec2(0.0, y_offset), egui::vec2(rect.width(), 20.0)),
         egui::Label::new(egui::RichText::new(label).size(14.0)),
     );
 }
@@ -266,6 +284,12 @@ struct HwMonitorApp {
     bios_version: String,
     translations: &'static Translations,
     gpu_usage: Option<u8>,
+    gpu_clock_mhz: Option<u64>,
+    gpu_vram_used_mb: Option<u64>,
+    gpu_vram_total_mb: Option<u64>,
+    cpu_clock_mhz: Option<u64>,
+    ram_used_mb: Option<u64>,
+    ram_total_mb: Option<u64>,
     cpu_prev: Vec<CpuStat>,
     cpu_usage: Vec<f32>,
     selected_pid: Option<u32>,
@@ -464,6 +488,12 @@ impl Default for HwMonitorApp {
             bios_version,
             translations: get_translations(),
             gpu_usage: None,
+            gpu_clock_mhz: None,
+            gpu_vram_used_mb: None,
+            gpu_vram_total_mb: None,
+            cpu_clock_mhz: None,
+            ram_used_mb: None,
+            ram_total_mb: None,
             cpu_prev: read_proc_stat(),
             cpu_usage: vec![],
             selected_pid: None,
@@ -518,11 +548,32 @@ impl eframe::App for HwMonitorApp {
                     .collect();
                 self.cpu_prev = curr_stat;
 
+                // Taktowanie CPU (MHz) - odczyt z cpufreq
+                self.cpu_clock_mhz = std::fs::read_to_string("/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq")
+                    .ok()
+                    .and_then(|s| s.trim().parse::<u64>().ok())
+                    .map(|khz| khz / 1000);
+
+                // Zużycie RAM (w bajtach -> MB) - odczyt z sysinfo
+                self.ram_total_mb = Some(self.system.total_memory() / 1024 / 1024);
+                self.ram_used_mb = Some(self.system.used_memory() / 1024 / 1024);
+
                 self.components.refresh();
                 
                 // Odczyt obciążenia GPU
                 if let Some(ref gpu) = self.gpu_handle {
                     self.gpu_usage = gpu.get_busy_percent().ok();
+                    // Taktowanie GPU - aktywny poziom z pp_dpm_sclk (MHz)
+                    if let Ok(levels) = gpu.get_clock_levels(amdgpu_sysfs::gpu_handle::PowerLevelKind::CoreClock) {
+                        self.gpu_clock_mhz = levels.active_level().copied();
+                    }
+                    // Zużycie VRAM (w bajtach -> MB)
+                    if let Ok(vram) = gpu.get_used_vram() {
+                        self.gpu_vram_used_mb = Some(vram / 1024 / 1024);
+                    }
+                    if let Ok(vram_total) = gpu.get_total_vram() {
+                        self.gpu_vram_total_mb = Some(vram_total / 1024 / 1024);
+                    }
                 }
                 
                 // Aktualizuj statystyki temperatur
@@ -582,11 +633,28 @@ impl eframe::App for HwMonitorApp {
                 };
                 
                 // Rysuj CPU Gauge
-                draw_gauge(ui, avg_usage, cpu_color, self.translations.cpu_load);
+                let cpu_clock = self.cpu_clock_mhz.unwrap_or(0);
+                let ram_used = self.ram_used_mb.unwrap_or(0);
+                let ram_total = self.ram_total_mb.unwrap_or(0);
+                let cpu_extra_info = if ram_total > 0 {
+                    Some(format!("{} MHz\nRAM: {} / {} MB", cpu_clock, ram_used, ram_total))
+                } else {
+                    Some(format!("{} MHz\nRAM: {} MB", cpu_clock, ram_used))
+                };
+                draw_gauge(ui, avg_usage, cpu_color, self.translations.cpu_load, cpu_extra_info.as_deref());
                 
                 ui.add_space(80.0); // Odstęp między łukami
                 
                 // Oblicz GPU
+                let clock = self.gpu_clock_mhz.unwrap_or(0);
+                let used = self.gpu_vram_used_mb.unwrap_or(0);
+                let total = self.gpu_vram_total_mb.unwrap_or(0);
+                let extra_info = if total > 0 {
+                    Some(format!("{} MHz\nVRAM: {} / {} MB", clock, used, total))
+                } else {
+                    Some(format!("{} MHz\nVRAM: {} MB", clock, used))
+                };
+                
                 if let Some(gpu_usage) = self.gpu_usage {
                     let gpu_usage_f32 = gpu_usage as f32;
                     let gpu_color = if gpu_usage > 80 {
@@ -596,14 +664,11 @@ impl eframe::App for HwMonitorApp {
                     } else {
                         egui::Color32::GREEN
                     };
-                    draw_gauge(ui, gpu_usage_f32, gpu_color, self.translations.gpu_load);
+                    draw_gauge(ui, gpu_usage_f32, gpu_color, self.translations.gpu_load, extra_info.as_deref());
                 } else {
-                    draw_gauge(ui, 0.0, egui::Color32::from_gray(100), self.translations.cannot_read_gpu);
+                    draw_gauge(ui, 0.0, egui::Color32::from_gray(100), self.translations.cannot_read_gpu, extra_info.as_deref());
                 }
             });
-            ui.add_space(10.0);
-            
-            // Zakładki
             ui.add_space(10.0);
             
             ui.horizontal(|ui| {
@@ -1049,6 +1114,7 @@ fn main() {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([600.0, 700.0])
+            .with_min_inner_size([400.0, 500.0])
             .with_title(translations.title)
             .with_resizable(true),
         ..Default::default()
