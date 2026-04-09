@@ -7,6 +7,7 @@ Linux Hardware Monitor - A modern system resource monitor for Linux (CPU, GPU, t
 - GPU monitoring (AMD support via sysfs).
 - Temperature tracking for all system components.
 - Process manager with memory reporting.
+- English and Polish language support.
 
 ## Installation
 
