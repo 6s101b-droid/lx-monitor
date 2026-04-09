@@ -1,0 +1,11 @@
+[Desktop Entry]
+Name=Hardware Monitor
+Name[pl]=Monitor Sprzętowy
+Comment=Monitor CPU, GPU temperatures and system resources
+Comment[pl]=Monitor temperatur CPU, GPU i zasobów systemowych
+Exec=lx-monitor
+Icon=lx-monitor
+Terminal=false
+Type=Application
+Categories=System;Monitor;Hardware;
+Keywords=system;monitor;hardware;temperature;cpu;gpu;

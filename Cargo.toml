@@ -1,0 +1,11 @@
+[package]
+name = "lx-monitor"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+sysinfo = "0.30"
+libc = "0.2"
+eframe = "0.27"
+egui = "0.27"
+amdgpu-sysfs = "0.19"
