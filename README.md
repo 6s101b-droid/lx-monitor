@@ -5,7 +5,6 @@ Linux Hardware Monitor - A modern system resource monitor for Linux (CPU, GPU, t
 ![Preview](lx-monitor.png)
 
 ## Features
-- Real-time CPU usage monitoring per core.
 - GPU monitoring (AMD support via sysfs).
 - Temperature tracking for all system components.
 - Process manager with memory reporting.
