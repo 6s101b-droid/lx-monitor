@@ -13,6 +13,14 @@ struct Translations {
     temperatures_tab: &'static str,
     hardware_tab: &'static str,
     processes_tab: &'static str,
+    autostart_tab: &'static str,
+    autostart_name: &'static str,
+    autostart_command: &'static str,
+    autostart_location: &'static str,
+    autostart_status: &'static str,
+    autostart_running: &'static str,
+    autostart_not_running: &'static str,
+    no_autostart: &'static str,
     process_name: &'static str,
     process_pid: &'static str,
     process_cpu: &'static str,
@@ -55,6 +63,14 @@ fn get_translations() -> &'static Translations {
         temperatures_tab: "Temperatures",
         hardware_tab: "Hardware",
         processes_tab: "Processes",
+        autostart_tab: "Autostart",
+        autostart_name: "Name",
+        autostart_command: "Command",
+        autostart_location: "Location",
+        autostart_status: "Status",
+        autostart_running: "Running",
+        autostart_not_running: "Not running",
+        no_autostart: "No autostart programs found",
         process_name: "Name",
         process_pid: "PID",
         process_cpu: "CPU %",
@@ -96,6 +112,14 @@ fn get_translations() -> &'static Translations {
         temperatures_tab: "Temperatury",
         hardware_tab: "Sprzęt",
         processes_tab: "Procesy",
+        autostart_tab: "Autostart",
+        autostart_name: "Nazwa",
+        autostart_command: "Komenda",
+        autostart_location: "Lokalizacja",
+        autostart_status: "Status",
+        autostart_running: "Uruchomiony",
+        autostart_not_running: "Nie uruchomiony",
+        no_autostart: "Brak programów autostartu",
         process_name: "Nazwa",
         process_pid: "PID",
         process_cpu: "CPU %",
@@ -207,6 +231,120 @@ fn get_private_memory_mb(pid: u32) -> Option<f64> {
     None
 }
 
+struct AutostartProgram {
+    name: String,
+    command: String,
+    location: String,
+    path: String,
+    running: bool,
+}
+
+fn get_autostart_programs(system: &System) -> Vec<AutostartProgram> {
+    let mut programs = Vec::new();
+    
+    // User-specific autostart directory
+    if let Some(home_dir) = std::env::var_os("HOME") {
+        let user_autostart = std::path::PathBuf::from(home_dir).join(".config/autostart");
+        if let Ok(entries) = std::fs::read_dir(user_autostart) {
+            for entry in entries.flatten() {
+                if let Some(ext) = entry.path().extension() {
+                    if ext == "desktop" {
+                        if let Some(mut prog) = parse_desktop_file(&entry.path(), "User") {
+                            prog.running = is_process_running(system, &prog.command);
+                            programs.push(prog);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    // System-wide autostart directory
+    let system_autostart = std::path::PathBuf::from("/etc/xdg/autostart");
+    if let Ok(entries) = std::fs::read_dir(system_autostart) {
+        for entry in entries.flatten() {
+            if let Some(ext) = entry.path().extension() {
+                if ext == "desktop" {
+                    if let Some(mut prog) = parse_desktop_file(&entry.path(), "System") {
+                        prog.running = is_process_running(system, &prog.command);
+                        programs.push(prog);
+                    }
+                }
+            }
+        }
+    }
+    
+    programs
+}
+
+fn is_process_running(system: &System, command: &str) -> bool {
+    // Extract the executable name from the command
+    let exe_name = command
+        .split_whitespace()
+        .next()
+        .and_then(|cmd| {
+            // Get just the filename without path
+            cmd.split('/').last()
+        })
+        .unwrap_or("");
+    
+    // Check if any process with this name is running
+    for process in system.processes().values() {
+        if process.name().to_lowercase() == exe_name.to_lowercase() {
+            return true;
+        }
+    }
+    
+    false
+}
+
+fn parse_desktop_file(path: &std::path::Path, location: &str) -> Option<AutostartProgram> {
+    let content = std::fs::read_to_string(path).ok()?;
+    
+    let mut name = String::new();
+    let mut command = String::new();
+    let mut in_desktop_entry = false;
+    
+    for line in content.lines() {
+        let line = line.trim();
+        
+        if line == "[Desktop Entry]" {
+            in_desktop_entry = true;
+            continue;
+        }
+        
+        if line.starts_with('[') && in_desktop_entry {
+            // End of Desktop Entry section
+            break;
+        }
+        
+        if in_desktop_entry {
+            if let Some(value) = line.strip_prefix("Name=") {
+                name = value.to_string();
+            } else if let Some(value) = line.strip_prefix("Exec=") {
+                command = value.to_string();
+            }
+        }
+    }
+    
+    if name.is_empty() {
+        // Fallback to filename if Name is not found
+        name = path.file_stem()?.to_string_lossy().to_string();
+    }
+    
+    if command.is_empty() {
+        return None;
+    }
+    
+    Some(AutostartProgram {
+        name,
+        command,
+        location: location.to_string(),
+        path: path.to_string_lossy().to_string(),
+        running: false,
+    })
+}
+
 fn draw_gauge(ui: &mut egui::Ui, percent: f32, color: egui::Color32, label: &str, extra_info: Option<&str>) {
     let (rect, _response) = ui.allocate_exact_size(egui::vec2(150.0, 120.0), egui::Sense::hover());
     let center = rect.center() + egui::vec2(0.0, 25.0);
@@ -294,6 +432,7 @@ struct HwMonitorApp {
     cpu_usage: Vec<f32>,
     selected_pid: Option<u32>,
     selected_temp: Option<String>,
+    selected_autostart: Option<String>,
 }
 
 impl Default for HwMonitorApp {
@@ -498,6 +637,7 @@ impl Default for HwMonitorApp {
             cpu_usage: vec![],
             selected_pid: None,
             selected_temp: None,
+            selected_autostart: None,
         }
     }
 }
@@ -507,7 +647,7 @@ impl eframe::App for HwMonitorApp {
         // Sticky footer na dole - zawsze widoczny
         egui::TopBottomPanel::bottom("footer_panel").show(ctx, |ui| {
             ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("0.1.1").color(egui::Color32::DARK_GRAY));
+                ui.label(egui::RichText::new("v0.1.2").color(egui::Color32::DARK_GRAY));
                 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     // Czas odświeżenia (po prawej)
@@ -675,6 +815,7 @@ impl eframe::App for HwMonitorApp {
                 ui.selectable_value(&mut self.selected_tab, 0, self.translations.temperatures_tab);
                 ui.selectable_value(&mut self.selected_tab, 1, self.translations.hardware_tab);
                 ui.selectable_value(&mut self.selected_tab, 2, self.translations.processes_tab);
+                ui.selectable_value(&mut self.selected_tab, 3, self.translations.autostart_tab);
             });
             ui.separator();
             
@@ -965,6 +1106,115 @@ impl eframe::App for HwMonitorApp {
                             response.context_menu(|ui| {
                                 if ui.button("Zakończ proces").clicked() {
                                     process.kill();
+                                    ui.close_menu();
+                                }
+                            });
+                        }
+                    }
+                }
+                3 => {
+                    // Zakładka Autostart
+                    ui.add_space(10.0);
+                    
+                    let autostart_programs = get_autostart_programs(&self.system);
+                    
+                    if autostart_programs.is_empty() {
+                        ui.label(self.translations.no_autostart);
+                    } else {
+                        // Sztywne szerokości kolumn (w pikselach)
+                        let status_width = 100.0;
+
+                        // Nagłówki tabeli
+                        ui.horizontal(|ui| {
+                            ui.label(egui::RichText::new(self.translations.autostart_name).strong());
+                            
+                            let right_width = status_width;
+                            let padding = ui.available_width() - right_width;
+                            if padding > 0.0 { ui.add_space(padding); }
+                            
+                            ui.allocate_ui_with_layout(egui::vec2(status_width, 20.0), egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                ui.label(egui::RichText::new(self.translations.autostart_status).strong());
+                            });
+                        });
+                        ui.separator();
+                        
+                        for program in &autostart_programs {
+                            let is_selected = self.selected_autostart.as_ref() == Some(&program.name);
+                            
+                            let fill = if is_selected {
+                                ui.visuals().selection.bg_fill
+                            } else {
+                                egui::Color32::TRANSPARENT
+                            };
+                            
+                            let response = egui::Frame::none()
+                                .fill(fill)
+                                .show(ui, |ui| {
+                                    ui.horizontal(|ui| {
+                                        ui.label(&program.name);
+                                        
+                                        let right_width = status_width;
+                                        let padding = ui.available_width() - right_width;
+                                        if padding > 0.0 { ui.add_space(padding); }
+                                        
+                                        // Status
+                                        ui.allocate_ui_with_layout(egui::vec2(status_width, 20.0), egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                            let status_text = if program.running {
+                                                self.translations.autostart_running
+                                            } else {
+                                                self.translations.autostart_not_running
+                                            };
+                                            let status_color = if program.running {
+                                                egui::Color32::GREEN
+                                            } else {
+                                                egui::Color32::GRAY
+                                            };
+                                            ui.label(egui::RichText::new(status_text).color(status_color));
+                                        });
+                                    });
+                                }).response.interact(egui::Sense::click());
+                            
+                            if response.clicked() {
+                                self.selected_autostart = Some(program.name.clone());
+                            }
+                            
+                            response.context_menu(|ui| {
+                                if ui.button("Otwórz lokalizację").clicked() {
+                                    // Try to open file manager with the file selected
+                                    let path = std::path::Path::new(&program.path);
+                                    
+                                    // Try different file managers with select option
+                                    let file_managers = vec![
+                                        ("nautilus", vec!["--select"]),
+                                        ("dolphin", vec!["--select"]),
+                                        ("nemo", vec!["--select"]),
+                                        ("thunar", vec![]),
+                                        ("pcmanfm", vec![]),
+                                    ];
+                                    
+                                    let mut opened = false;
+                                    for (cmd, args) in file_managers {
+                                        if Command::new(cmd)
+                                            .args(args.iter())
+                                            .arg(&program.path)
+                                            .spawn()
+                                            .is_ok()
+                                        {
+                                            opened = true;
+                                            break;
+                                        }
+                                    }
+                                    
+                                    // Fallback to xdg-open on the parent folder
+                                    if !opened {
+                                        if let Some(parent) = path.parent() {
+                                            Command::new("xdg-open")
+                                                .arg(parent)
+                                                .spawn()
+                                                .ok();
+                                        }
+                                    }
+                                    
                                     ui.close_menu();
                                 }
                             });
