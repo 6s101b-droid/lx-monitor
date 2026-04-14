@@ -1,5 +1,5 @@
 pkgname=lx-monitor
-pkgver=0.1.1
+pkgver=0.1.2
 pkgrel=1
 pkgdesc="Linux Monitor - Monitor CPU, GPU temperatures and system resources"
 arch=('x86_64')
